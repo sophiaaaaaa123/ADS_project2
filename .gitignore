@@ -1,0 +1,11 @@
+# Ignore data files
+data/
+
+# Ignore raw Domain data
+domain/
+
+# macOS
+.DS_Store
+
+# Jupyter checkpoints
+.ipynb_checkpoints/

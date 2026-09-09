@@ -16,6 +16,9 @@ data/curated/*
 !data/raw/.gitkeep
 !data/curated/.gitkeep
 
+# Scraped property listings, held outside the data tree by the scraping members
+domain/
+
 *.parquet
 *.gpkg
 *.shp
@@ -23,6 +26,8 @@ data/curated/*
 *.dbf
 *.prj
 *.zip
+*.xlsx
+*.csv
 
 # Cache, including cached API responses
 cache/

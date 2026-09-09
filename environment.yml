@@ -1,0 +1,12 @@
+name: mast30034_p2
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pyogrio
+  - shapely
+  - geopandas
+  - pyproj
+  - rtree
+  - fastparquet
+prefix: /opt/anaconda3/envs/mast30034_p2

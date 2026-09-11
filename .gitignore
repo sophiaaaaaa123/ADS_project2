@@ -19,6 +19,7 @@ data/curated/*
 # Scraped property listings, held outside the data tree by the scraping members
 domain/
 
+# Data formats, excluded wherever they appear
 *.parquet
 *.gpkg
 *.shp
@@ -29,6 +30,16 @@ domain/
 *.xlsx
 *.csv
 
+# Final deliverables are committed by exception, and must stay below the
+# format rules above, since a later rule overrides an earlier one. The tabular
+# feature table is a few hundred kilobytes and is the only file the modelling
+# and visualisation members need, so keeping it in the repository saves each
+# of them downloading five external datasets and rerunning the pipeline. The
+# geopackage is not committed, since the geometry makes it far larger and only
+# the mapping work uses it.
+!data/curated/sa2_features.parquet
+!data/curated/property_geo_features.parquet
+
 # Cache, including cached API responses
 cache/
 __pycache__/
@@ -37,10 +48,10 @@ __pycache__/
 # Notebooks
 .ipynb_checkpoints/
 
+# Editor
+settings.json
+.vscode/
+
 # OS
 .DS_Store
 .Rhistory
-
-
-#Setting
-settings.json

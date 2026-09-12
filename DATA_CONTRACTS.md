@@ -21,7 +21,8 @@ code begins with the digit 2 the loss is invisible in this state but breaks any
 join against a national dataset.
 
 **`property_id` is the join key for all property level data.** It is a string,
-unique, and never null.
+unique, and never null. It carries the Domain listing identifier, renamed from
+`listing_id` on read.
 
 **Geographic reference: ASGS Edition 3, 2021 SA2 boundaries, GDA2020.** Edition 4
 became available from July 2026 but is not used, because the population
@@ -42,13 +43,14 @@ coordinates is wrong by a varying amount across the state.
 ## sa2_features.parquet
 
 **Owner:** Member C
-**Produced by:** `notebooks/01_external_data.ipynb`
+**Produced by:** `code/01_external_data.ipynb`
 **Rows:** 524, one per Victorian SA2
 **Columns:** 38
+**Status:** complete, committed to the repository
 
 A companion `sa2_features.gpkg` carries the same rows plus geometry for mapping
 and spatial joins. The parquet has no geometry so it stays small and merges
-cleanly.
+cleanly, and it is the only one of the two committed to git.
 
 ### Identifiers
 
@@ -141,8 +143,8 @@ than local earnings. A model relying on income alone will underpredict rent
 there. Consider an interaction with dwelling density or a student area
 indicator.
 
-**Reference periods do not align.** Listings are current, income covers
-2022 to 2023, projections are anchored on a 2023 base.
+**Reference periods do not align.** Listings were scraped in 2025, income
+covers 2022 to 2023, and projections are anchored on a 2023 base.
 
 **`demand_supply_gap_10y` has little variation.** The median and both
 quartiles are exactly zero, because Victoria in Future appears to derive
@@ -160,23 +162,28 @@ rest of the top ten.
 ## property_geo_features.parquet
 
 **Owner:** Member C
-**Produced by:** `notebooks/02_spatial_features.ipynb`
-**Rows:** one per property
+**Produced by:** `code/02_spatial_features.ipynb`
+**Rows:** 11945, one per listing
 **Columns:** 23
+**Status:** complete, built from the scraped listings
 
-Currently written as `test_property_geo_features.parquet` from 500 generated
-coordinates. The pipeline is complete and validated. When
-`properties.parquet` exists, two lines change: the input path and the output
-filename.
+One row for every listing in `rental_data/analysis_data`, joined on
+`property_id`.
 
 ### Identifiers and location
 
 | column | type | unit | notes |
 |---|---|---|---|
-| `property_id` | string | | Foreign key to `properties.parquet`. Unique, never null. |
-| `sa2_code_2021` | string | | Foreign key to `sa2_features.parquet`. Assigned by point in polygon. Null where the point falls outside every Victorian SA2. |
+| `property_id` | string | | The Domain `listing_id`, renamed on read. Unique, never null. |
+| `sa2_code_2021` | string | | Foreign key to `sa2_features.parquet`. Assigned by point in polygon. |
 | `sa2_name_2021` | string | | Display only. |
-| `in_victoria` | bool | | False where no SA2 contains the point. |
+| `in_victoria` | bool | | True for every listing. Retained because the pipeline reports rather than drops a point outside every SA2. |
+
+**All 11945 listings matched to an SA2, with none unmatched.** The validation
+run on generated coordinates had 30 unmatched of 500, all of which proved to be
+in Port Phillip Bay, an artefact of perturbing bayside station coordinates. On
+scraped addresses the rate is zero, and a non zero rate in a future batch would
+point to a geocoding error worth investigating.
 
 **Suburb names are never used to assign an SA2.** A suburb can span several
 SA2s and an SA2 can cover several suburbs, so name matching produces confident
@@ -191,7 +198,7 @@ Reference point is Flinders Street Station at -37.8183, 144.9671.
 | column | type | unit | notes |
 |---|---|---|---|
 | `straight_km_to_cbd` | float | km | Computed locally in EPSG 7855. |
-| `route_km_to_cbd` | float | km | Driving route via OpenRouteService. Null where the point is unroutable. |
+| `route_km_to_cbd` | float | km | Driving route via OpenRouteService. |
 | `route_min_to_cbd` | float | minutes | Free flow driving time. |
 
 ### Train stations
@@ -199,7 +206,7 @@ Reference point is Flinders Street Station at -37.8183, 144.9671.
 | column | type | unit | notes |
 |---|---|---|---|
 | `straight_km_to_nearest_station` | float | km | Measured, from a BallTree over projected coordinates. |
-| `est_route_km_to_nearest_station` | float | km | **Estimated, not measured.** Straight line distance multiplied by a calibrated detour index of 1.587. The `est_` prefix marks it as an estimate. |
+| `est_route_km_to_nearest_station` | float | km | **Estimated, not measured.** Straight line distance multiplied by a calibrated detour index of 1.537. The `est_` prefix marks it as an estimate. |
 | `nearest_station_name` | string | | |
 | `n_stations_within_1km` | int | count | |
 | `n_stations_within_2km` | int | count | |
@@ -233,36 +240,47 @@ Reference point is Flinders Street Station at -37.8183, 144.9671.
 ### Route distance strategy
 
 The specification asks for proximity by road route rather than straight line.
-Routing every property to every station is not feasible on the free tier,
-which allows 500 matrix calls per day, so a two tier approach is used.
+Routing every listing to every station is not feasible on the free tier, which
+allows 500 matrix calls per day, so a two tier approach is used.
 
-**Melbourne CBD is routed directly.** At a median of 25 kilometres, river
+**Melbourne CBD is routed directly.** At twenty or thirty kilometres, river
 crossings, freeway access and one way systems shift the answer by kilometres.
-All 500 test properties fit in a single matrix request against one
-destination.
+The free tier caps a matrix at 3500 origin destination pairs, so the 11945
+listings are sent in four batches of up to 3000 against the single CBD
+destination, costing four of the 500 daily calls. Each batch caches
+independently, so an interrupted run resumes without respending quota.
 
 **Station distance is estimated from a calibrated detour index.** A random
-sample of 50 properties was routed to its nearest station and the ratio of
-route distance to straight line distance measured. After excluding four
-implausible ratios, two below one and two above three, the median is **1.587**
-with an interquartile range of 1.347 to 1.802.
+sample of 50 listings was routed to its nearest station and the ratio of route
+distance to straight line distance measured. After excluding five implausible
+ratios above three, the median is **1.537** with an interquartile range of
+1.287 to 2.019. A station one kilometre away in a straight line is on average
+about 1.5 kilometres by road.
 
-**A ratio below one is physically impossible**, since no route is shorter than
-the straight line between its endpoints. Those cases arise where
-OpenRouteService snaps an endpoint to the nearest routable road and the
-coordinate sits away from the network. No error is raised when this happens.
+**The index is a finding in its own right.** It quantifies how far the
+Melbourne road network departs from direct access to rail.
 
-**The effect is confined to short distances.** Two of fifty calibration pairs
-show it, at straight line distances of 0.91 and 1.38 kilometres, while none of
-the 493 routed CBD distances came back shorter than its straight line. A snap
-of a few hundred metres is a large fraction of a one kilometre trip and
-negligible over twenty five kilometres. Routing is most reliable at the scale
-where it matters and least reliable at the scale where the straight line is
-already a good approximation, which is what the two tier strategy exploits.
+### The snapping guard, and why it is retained
 
-**The index is also a finding.** A station one kilometre away in a straight
-line is on average 1.6 kilometres by road, which quantifies how far the
-Melbourne road network deviates from direct access to rail.
+A route cannot be shorter than the straight line between its endpoints, so a
+ratio below one proves that OpenRouteService routed between different points
+from the ones requested. The service snaps each endpoint to the nearest
+routable road, and where a coordinate sits away from the network the snap moves
+it. No error is raised when this happens.
+
+**The validation run showed the problem clearly.** Two of fifty calibration
+pairs on generated coordinates returned a ratio below one, at straight line
+distances of 0.91 and 1.38 kilometres. Those test points had been perturbed
+into the bay or away from any road.
+
+**The scraped listings show none of it.** No calibration pair falls below one,
+the smallest ratio being 1.010, and none of the routed CBD distances is shorter
+than its straight line. Scraped addresses sit on streets, so the snap moves
+them by metres rather than hundreds of metres.
+
+The guard remains in the final assertions. It cost nothing, it caught a real
+problem during validation, and it will catch a geocoding error in any future
+batch of listings.
 
 ### Known limitations
 
@@ -281,22 +299,16 @@ median strips.
 **`shop=mall` is applied loosely.** Some records are individual shops, such as
 John Thomson & Co in western Victoria.
 
-**Seven of the 500 test properties are unroutable.** These are generated
-coordinates that fell into Port Phillip Bay, an artefact of the test data
-rather than a property of the pipeline. On scraped listings the rate should
-approach zero, and any unroutable property in real data indicates a
-geocoding error worth investigating rather than a routing failure.
-
 ### Guarantees
 
 - Exactly one row per `property_id` in the input
-- `sa2_code_2021` is non null for every property inside Victoria
+- `sa2_code_2021` is non null for every row
 - No routed distance is shorter than its straight line equivalent
 - `straight_km_to_nearest_named_park` is never below `straight_km_to_nearest_park`
 - All distance columns are non negative
-- Properties outside every SA2 are flagged rather than silently dropped or
-  snapped to the nearest polygon, since snapping would fabricate a location
-  and hide genuine coordinate errors
+- A listing outside every SA2 would be flagged rather than silently dropped or
+  snapped to the nearest polygon, since snapping would fabricate a location and
+  hide a genuine coordinate error
 
 ---
 
@@ -308,7 +320,7 @@ property level build rather than deliverables.
 | file | contents |
 |---|---|
 | `vic_school_points.parquet` | 2293 school campuses with coordinates and SA2. |
-| `vic_train_stations.parquet` | 320 stations. Albury lies in New South Wales and is flagged by `in_victoria` being false, retained because for properties near Wodonga it may be the nearest station. |
+| `vic_train_stations.parquet` | 320 stations. Albury lies in New South Wales and is flagged by `in_victoria` being false, retained because for listings near Wodonga it may be the nearest station. |
 | `osm_parks_vic.parquet` | 17005 green space records, 8042 named. |
 | `osm_malls_vic.parquet` | 383 shopping centres inside Victoria. |
 | `sa2_vic_boundaries.gpkg` | 524 SA2 polygons. |
@@ -316,43 +328,47 @@ property level build rather than deliverables.
 
 ---
 
-## properties.parquet
+## rental_data/analysis_data
 
 **Owner:** Members A and B
-**Status:** pending
+**Produced by:** `code/plant_scraper.ipynb` and `code/preprocessing.ipynb`
+**Rows:** 11945
+**Status:** complete
 
-Member C requires only `property_id`, `latitude` and `longitude`. The spatial
-pipeline is built and validated and will run against this file without
-modification.
+A Spark parquet directory rather than a single file, so a reader points at the
+directory and pandas reads every part file inside it.
 
-| column | type | unit | notes |
-|---|---|---|---|
-| `property_id` | string | | Primary key. |
-| `weekly_rent` | float | AUD per week | Target variable. |
-| `bedrooms` | int | count | |
-| `bathrooms` | int | count | |
-| `car_spaces` | int | count | |
-| `property_type` | string | | house, apartment, townhouse, unit, other. |
-| `latitude` | float | decimal degrees | EPSG 4326. |
-| `longitude` | float | decimal degrees | EPSG 4326. |
-| `address_raw` | string | | Auditing only, never a join key. |
-| `scraped_at` | timestamp | UTC | |
+Member C consumes only three columns, and renames them on read to match the
+names used throughout this document.
 
-Guarantees expected:
+| upstream name | name used downstream |
+|---|---|
+| `listing_id` | `property_id` |
+| `lat` | `latitude` |
+| `lon` | `longitude` |
 
-- `property_id` unique and never null
-- Coordinates non null and inside Victoria
-- `weekly_rent` non null and strictly positive
+The remaining columns include `weekly_rent`, `bedrooms`, `bathrooms`,
+`carspaces`, `suburb`, `postcode`, `primary_type` and `date_listed`, which the
+modelling work reads directly from this file.
+
+`primary_type` takes the values House, Apartment, Townhouse/Villa and New
+Developments, which differ from the values proposed in an earlier draft of this
+document. The upstream values are authoritative.
 
 ---
 
 ## predictions.parquet
 
 **Owner:** Member D
+**Produced by:** the modelling notebook
 **Status:** pending
 
-Expected to carry a predicted rent per property or per SA2, together with a
+Expected to carry a predicted rent per listing or per SA2, together with a
 feature importance table addressing the first research question.
+
+Join `rental_data/analysis_data` to `property_geo_features.parquet` on
+`property_id`, then to `sa2_features.parquet` on `sa2_code_2021`. Filter on
+`is_modelling_ready` before fitting.
 
 ---
 
@@ -376,6 +392,11 @@ Raw downloads under `data/landing/` and intermediate files under `data/raw/`
 are excluded from version control and regenerated by running the notebooks.
 Each landing subdirectory carries a `SOURCE.md` recording origin, reference
 period, download date and licence.
+
+Two curated files are committed by exception, being `sa2_features.parquet` and
+`property_geo_features.parquet`. Both are small, both are stable deliverables,
+and committing them saves every downstream member from downloading five
+external datasets and rerunning the pipeline.
 
 API responses are cached under `cache/`, also excluded. The OpenRouteService
 free tier allows 500 matrix calls per day, so an unguarded rerun could exhaust

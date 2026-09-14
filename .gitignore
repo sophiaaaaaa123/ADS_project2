@@ -40,6 +40,20 @@ domain/
 !data/curated/sa2_features.parquet
 !data/curated/property_geo_features.parquet
 
+# Keep cleaned listing datasets.
+!data/analysis_data/**
+!data/metadata/**
+
+# Spark bookkeeping files are regenerated and are not needed to read Parquet.
+*.crc
+_SUCCESS
+_temporary/
+
+# Keep all merged-table outputs for sharing and review.
+!data/curated/master_modelling_table_full.parquet
+!data/curated/master_modelling_table.parquet
+!data/curated/master_modelling_table.csv
+
 # Cache, including cached API responses
 cache/
 __pycache__/
